@@ -197,9 +197,9 @@ REPORT RequestId: cbdb0e9e-5215-4b34-bda5-6f018f2c55a9
 Extracto de una invocación caliente (warm) de cada función:
 
 ```text
-REPORT RequestId: 740e57b8-cc7c-40bd-98b9-e177ba02f0fa
-  Duration: 1.51 ms
-  Billed Duration: 2 ms
+REPORT RequestId: bf62c881-8517-410d-9af9-2763ede7a29c
+  Duration: 310.87 ms
+  Billed Duration: 311 ms
   Memory Size: 128 MB
   Max Memory Used: 96 MB
 ```
@@ -221,7 +221,7 @@ REPORT RequestId: 884d8143-ac5a-4b87-b055-a35a8429491e
 |---|---|---|
 | Invocaciones (Invocations) | 5 | 5 |
 | Errores de ejecución (Errors) | 0 * | 0 * |
-| Duración (Duration) | 505.51 ms (cold) / 1.51 ms (warm) | 279.26 ms (cold) / 39.70 ms (warm) |
+| Duración (Duration) | 505.51 ms (cold) / 310.87 ms (warm) | 279.26 ms (cold) / 39.70 ms (warm) |
 | Tiempo de inicialización (Init Duration) | 528.08 ms | 421.06 ms |
 | Memoria máxima utilizada | 96 MB de 128 MB | 90 MB de 128 MB |
 
@@ -232,9 +232,9 @@ REPORT RequestId: 884d8143-ac5a-4b87-b055-a35a8429491e
 
 ### 4.3 Análisis
 
-1. **Cold start frente a warm:** la inicialización (`Init Duration`) de `upload_image` es de 528.08 ms, comparable a su `Duration` de 505.51 ms. El costo de arranque se concentra en la inicialización del runtime y de los clientes boto3, por lo que la reutilización de clientes fuera del handler beneficia a las invocaciones posteriores en el mismo contenedor. El REPORT warm de upload_image (1.51 ms) frente al cold start (505.51 ms) muestra la diferencia entre inicializar el entorno y reutilizarlo.
+1. **Cold start frente a warm:** la inicialización (`Init Duration`) de `upload_image` es de 528.08 ms, comparable a su `Duration` de 505.51 ms. El costo de arranque se concentra en la inicialización del runtime y de los clientes boto3, por lo que la reutilización de clientes fuera del handler beneficia a las invocaciones posteriores en el mismo contenedor. El REPORT warm de upload_image (310.87 ms) frente al cold start (505.51 ms) muestra la diferencia entre inicializar el entorno y reutilizarlo.
 2. **Memoria:** ambas funciones usan alrededor de 90–96 MB de los 128 MB configurados. Hay margen de memoria, pero la CPU asignada depende de la memoria configurada, por lo que subirla a 256 MB o 512 MB reduciría la duración de `upload_image`, que es la función más costosa (carga y escritura en S3).
-3. **Función de subida frente a consulta:** Comparando ejecuciones del mismo tipo: en frío (cold start), `upload_image` tarda 505.51 ms frente a 279.26 ms de `get_image_metadata`, ya que en la subida el tiempo incluye la escritura simultánea en S3 y en DynamoDB, mientras que en la consulta solo se realiza lectura de DynamoDB y generación de la URL en memoria. En ejecución en caliente (warm), `upload_image` registró 1.51 ms frente a 39.70 ms de `get_image_metadata`.
+3. **Función de subida frente a consulta:** Comparando ejecuciones del mismo tipo: en frío (cold start), `upload_image` tarda 505.51 ms frente a 279.26 ms de `get_image_metadata`, y en caliente (warm) tarda 310.87 ms frente a 39.70 ms, ya que en la subida el tiempo incluye la escritura en S3 y luego en DynamoDB, mientras que en la consulta solo se realiza lectura de DynamoDB y generación de la URL en memoria.
 
 ---
 
