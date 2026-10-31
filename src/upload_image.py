@@ -1,8 +1,10 @@
-import os
+import base64
 import json
-import boto3
-from uuid import uuid4
+import os
 import re
+from uuid import uuid4
+
+import boto3
 
 # Variables de entorno
 BUCKET_NAME = os.getenv('BUCKET_NAME')
@@ -10,40 +12,59 @@ TABLE_NAME = os.getenv('TABLE_NAME')
 
 # Clientes AWS
 s3_client = boto3.client('s3')
-dynamodb_client = boto3.resource('dynamodb')
-table = dynamodb_client.Table(TABLE_NAME)
+dynamodb_resource = boto3.resource('dynamodb')
+table = dynamodb_resource.Table(TABLE_NAME)
+
+def get_image_bytes(event):
+    body = event.get('body')
+    if not body:
+        raise ValueError("No image data received")
+    if event.get('isBase64Encoded'):
+        return base64.b64decode(body)
+    return body.encode('utf-8') if isinstance(body, str) else body
 
 def upload_image(event, context):
     try:
-        # Obtener imagen desde la solicitud (puede ser base64 si es API Gateway)
-        image_data = event.get('body')
-        if not image_data:
-            raise ValueError("No image data received")
+        # Decodificar body y obtener los bytes reales de la imagen
+        image_bytes = get_image_bytes(event)
         
-        # Generar un nombre único para la imagen sin puntos ni guiones
-        image_id = re.sub(r'[^a-zA-Z0-9]', '', str(uuid4()))  # Eliminar caracteres no alfanuméricos
+        # Generar un nombre único para la imagen sin caracteres especiales
+        image_id = re.sub(r'[^a-zA-Z0-9]', '', str(uuid4()))
         image_name = f"{image_id}.jpg"
 
-        # Subir la imagen al bucket S3
-        s3_client.put_object(Bucket=BUCKET_NAME, Key=image_name, Body=image_data)
+        # Subir la imagen al bucket S3 con su ContentType adecuado
+        s3_client.put_object(
+            Bucket=BUCKET_NAME,
+            Key=image_name,
+            Body=image_bytes,
+            ContentType='image/jpeg'
+        )
 
-        # Crear URL pública de la imagen
+        # Construir la URL del objeto en S3
         image_url = f"https://{BUCKET_NAME}.s3.amazonaws.com/{image_name}"
 
-        # Guardar metadatos de la imagen en DynamoDB
+        # Guardar metadatos en DynamoDB con el tamaño real en bytes
         table.put_item(Item={
-            'image_id': image_id,  # Guardar el ID limpio sin guiones ni puntos
+            'image_id': image_id,
             'url': image_url,
-            'size': len(image_data.encode('utf-8')) if isinstance(image_data, str) else len(image_data),
+            'size': len(image_bytes)
         })
 
         return {
             'statusCode': 200,
-            'body': json.dumps({'message': 'Image uploaded successfully!', 'url': image_url})
+            'body': json.dumps({
+                'message': 'Image uploaded successfully!',
+                'url': image_url
+            })
         }
 
+    except ValueError as e:
+        print(f"Error de validacion: {str(e)}")
+        return {
+            'statusCode': 400,
+            'body': json.dumps({'error': str(e)})
+        }
     except Exception as e:
-        # Log del error para diagnosticar
         print(f"Error: {str(e)}")
         return {
             'statusCode': 500,
