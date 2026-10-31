@@ -40,13 +40,21 @@ def upload_image(event, context):
             ContentType='image/jpeg'
         )
 
-        # Construir la URL del objeto en S3
-        image_url = f"https://{BUCKET_NAME}.s3.amazonaws.com/{image_name}"
+        # Generar URL prefirmada de descarga (vigencia de 1 hora = 3600 segundos)
+        presigned_url = s3_client.generate_presigned_url(
+            'get_object',
+            Params={'Bucket': BUCKET_NAME, 'Key': image_name},
+            ExpiresIn=3600
+        )
 
-        # Guardar metadatos en DynamoDB con el tamaño real en bytes
+        # URL base informativa
+        url_s3 = f"https://{BUCKET_NAME}.s3.amazonaws.com/{image_name}"
+
+        # Guardar metadatos en DynamoDB incluyendo key y url_s3
         table.put_item(Item={
             'image_id': image_id,
-            'url': image_url,
+            'key': image_name,
+            'url_s3': url_s3,
             'size': len(image_bytes)
         })
 
@@ -54,7 +62,8 @@ def upload_image(event, context):
             'statusCode': 200,
             'body': json.dumps({
                 'message': 'Image uploaded successfully!',
-                'url': image_url
+                'image_id': image_id,
+                'url': presigned_url
             })
         }
 

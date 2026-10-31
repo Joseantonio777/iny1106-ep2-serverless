@@ -6,8 +6,10 @@ import boto3
 
 # Variables de entorno
 TABLE_NAME = os.getenv('TABLE_NAME')
+BUCKET_NAME = os.getenv('BUCKET_NAME')
 
-# Cliente de DynamoDB
+# Clientes AWS
+s3_client = boto3.client('s3')
 dynamodb_resource = boto3.resource('dynamodb')
 table = dynamodb_resource.Table(TABLE_NAME)
 
@@ -40,11 +42,31 @@ def get_image_metadata(event, context):
                 'body': json.dumps({'message': 'Image not found'})
             }
 
-        # Convertir y retornar el item (incluye image_id, url y size)
         item = response['Item']
+        key = item.get('key') or f"{image_id}.jpg"
+        bucket = BUCKET_NAME or (item.get('url_s3', '').split('.s3.amazonaws.com')[0].replace('https://', '') if item.get('url_s3') else None)
+
+        # Generar URL prefirmada de descarga válida por 1 hora (3600 s)
+        presigned_url = s3_client.generate_presigned_url(
+            'get_object',
+            Params={'Bucket': bucket, 'Key': key},
+            ExpiresIn=3600
+        )
+
+        response_body = {
+            'image_id': item['image_id'],
+            'size': item['size'],
+            'url': presigned_url
+        }
+
+        if 'key' in item:
+            response_body['key'] = item['key']
+        if 'url_s3' in item:
+            response_body['url_s3'] = item['url_s3']
+
         return {
             'statusCode': 200,
-            'body': json.dumps(item, default=decimal_default)
+            'body': json.dumps(response_body, default=decimal_default)
         }
 
     except Exception as e:
