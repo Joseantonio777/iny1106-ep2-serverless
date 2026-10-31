@@ -48,8 +48,8 @@ El objetivo de esta evaluación es implementar una arquitectura serverless en AW
 ![Bucket S3](img/01_s3_bucket.png)
 *Figura 1: Bucket `my-image-storage-bucket-[ACCOUNT_ID]` en `us-east-1`.*
 
-![Objeto en S3](img/01b_s3_objects.png)
-*Figura 1.1: Objeto JPEG almacenado en el bucket. Tamaño: 536 bytes.*
+![Objetos en S3](img/01b_s3_objects.png)
+*Figura 1.1: Bucket con las pruebas realizadas. El objeto de 536 bytes es el de la prueba final; el de 39 bytes corresponde a la subida anterior a la corrección del cuerpo binario.*
 
 ### Paso 2: Tabla DynamoDB (IE2.2.2)
 
