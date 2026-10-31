@@ -79,7 +79,7 @@ Se desplegaron dos funciones serverless con runtime **Python 3.12**, tiempo de e
 - **Variables de Entorno:**
   - `BUCKET_NAME`: `my-image-storage-bucket-[ACCOUNT_ID]`
   - `TABLE_NAME`: `ImageMetadata`
-- **Lógica implementada:** Decodificación de body binario/Base64, subida a S3 con `ContentType='image/jpeg'`, generación de URL prefirmada de 1 hora, inserción de metadatos en DynamoDB y manejo de error `400 Bad Request` ante carga vacía.
+- **Lógica implementada:** Decodificación de body binario/Base64, subida a S3 con `ContentType='image/jpeg'`, generación de URL prefirmada de 1 hora, inserción de metadatos en DynamoDB y manejo de error `400 Bad Request` ante carga vacía. Clientes SDK instanciados fuera del handler.
 
 ![Lambda upload_image](img/03_lambda_upload.png)
 *Figura 3: Configuración y variables de entorno de la función `upload_image`.*
@@ -88,11 +88,11 @@ Se desplegaron dos funciones serverless con runtime **Python 3.12**, tiempo de e
 - **Runtime:** Python 3.12
 - **Handler:** `get_image_metadata.get_image_metadata`
 - **Timeout:** 30 segundos
-- **Rol IAM:** `LabRole`
+- **Rol IAM:** `LabRole` (`arn:aws:iam::[ACCOUNT_ID]:role/LabRole`)
 - **Variables de Entorno:**
   - `TABLE_NAME`: `ImageMetadata`
   - `BUCKET_NAME`: `my-image-storage-bucket-[ACCOUNT_ID]`
-- **Lógica implementada:** Extracción resiliente de `pathParameters` (manejando `None`), consulta por `image_id`, generación dinámica de URL prefirmada de descarga, retorno `404 Not Found` en caso de no existir y serialización JSON adecuada para campos `Decimal`.
+- **Lógica implementada:** Extracción resiliente de `pathParameters` (manejando `None`), consulta por `image_id`, generación dinámica de URL prefirmada de descarga (usando `BUCKET_NAME` con respaldo en `url_s3`), retorno `404 Not Found` en caso de no existir y serialización JSON adecuada para campos `Decimal`. Clientes SDK instanciados fuera del handler.
 
 ![Lambda get_image_metadata](img/04_lambda_get.png)
 *Figura 4: Configuración y variables de entorno de la función `get_image_metadata`.*
@@ -120,11 +120,14 @@ Se desplegaron dos funciones serverless con runtime **Python 3.12**, tiempo de e
 
 ### Paso 5: Pruebas de Funcionamiento de la API (IE2.3.1)
 
+El flujo de verificación de la solución se ejecuta en el siguiente orden secuencial:
+
 #### 5.1 Subida de Imagen (`POST /upload`)
 - **Método:** `POST`
 - **Endpoint:** `https://[API_ID].execute-api.us-east-1.amazonaws.com/dev/upload`
-- **Body:** Binario de imagen JPEG (524 bytes)
-- **Respuesta:** `200 OK`
+- **Headers:** `Content-Type: image/jpeg`
+- **Body:** Binario de imagen JPEG (524 bytes) [PENDIENTE: confirmar tamaño real si se usa otra imagen]
+- **Respuesta Esperada:** `200 OK` con JSON conteniendo `message`, `image_id` y `url` (prefirmada).
 ```json
 {
   "message": "Image uploaded successfully!",
@@ -132,14 +135,14 @@ Se desplegaron dos funciones serverless con runtime **Python 3.12**, tiempo de e
   "url": "https://my-image-storage-bucket-[ACCOUNT_ID].s3.amazonaws.com/[IMAGE_ID].jpg?AWSAccessKeyId=...&Signature=...&Expires=..."
 }
 ```
-
+- **Captura:**
 ![Prueba POST Postman](img/06_postman_post.png)
 *Figura 6: Solicitud POST /upload exitosa.*
 
 #### 5.2 Consulta de Metadatos (`GET /metadata/{image_id}`)
 - **Método:** `GET`
 - **Endpoint:** `https://[API_ID].execute-api.us-east-1.amazonaws.com/dev/metadata/[IMAGE_ID]`
-- **Respuesta:** `200 OK`
+- **Respuesta Esperada:** `200 OK` con JSON conteniendo `image_id`, `size`, `url` prefirmada recién generada, `key` y `url_s3`.
 ```json
 {
   "image_id": "[IMAGE_ID]",
@@ -149,9 +152,19 @@ Se desplegaron dos funciones serverless con runtime **Python 3.12**, tiempo de e
   "url_s3": "https://my-image-storage-bucket-[ACCOUNT_ID].s3.amazonaws.com/[IMAGE_ID].jpg"
 }
 ```
-
+- **Captura:**
 ![Prueba GET Postman](img/07_postman_get.png)
 *Figura 7: Solicitud GET /metadata/{image_id} retornando los metadatos de la imagen.*
+
+#### 5.3 Descarga y Visualización mediante URL Prefirmada
+- **Método:** `GET` (en navegador web)
+- **Endpoint:** URL prefirmada obtenida en la respuesta de consulta o subida (`https://my-image-storage-bucket-[ACCOUNT_ID].s3.amazonaws.com/[IMAGE_ID].jpg?...`).
+- **Respuesta Esperada:** La imagen se abre directamente en el navegador sin error de permisos (`403 Forbidden`), confirmando la validez de la firma criptográfica temporal de S3.
+- **Captura:** `img/07b_download_presigned.png` [PENDIENTE: agregar captura de la imagen visualizada en el navegador web]
+
+#### 5.4 Pruebas de Error Controlado
+- **Error 400 Bad Request:** En Postman [PENDIENTE: confirmar herramienta usada] se envió una petición `POST /upload` con cuerpo vacío. La función capturó la excepción y retornó `400 Bad Request` con `{"error": "No image data received"}`.
+- **Error 404 Not Found:** Se consultó `GET /metadata/nonexistent99999` con un identificador inexistente. La función retornó `404 Not Found` con `{"message": "Image not found"}`.
 
 ---
 
@@ -179,26 +192,31 @@ REPORT RequestId: 31321f0b-b2ab-4efd-8764-0ce74418544b
 *Figura 8: Grupos de registro y eventos en CloudWatch Logs.*
 
 #### 6.2 Métricas de Rendimiento en CloudWatch
-Métricas reales recopiladas en CloudWatch tras el ciclo de pruebas:
+Métricas recopiladas en CloudWatch tras el ciclo de pruebas:
 
-| Métrica | `upload_image` | `get_image_metadata` |
+| Métrica / Fase | `upload_image` | `get_image_metadata` |
 |---|---|---|
 | Invocaciones (Invocations) | 3 | 3 |
 | Errores de ejecución Lambda (Errors) | 0 * | 0 * |
-| Duración (Duration) | 505.51 ms | [PENDIENTE: evidencia real] |
+| Duración Cold Start (Duration) | 505.51 ms | [PENDIENTE: evidencia real] |
 | Tiempo de Inicialización (Init Duration) | 528.08 ms | [PENDIENTE: evidencia real] |
-| Duración en Invocación Caliente (Warm) | [PENDIENTE: pegar REPORT de una invocación en caliente de cada función] | [PENDIENTE: pegar REPORT de una invocación en caliente de cada función] |
+| Invocación Caliente (Warm Duration) | [PENDIENTE: pegar REPORT de una invocación en caliente de cada función] | [PENDIENTE: pegar REPORT de una invocación en caliente de cada función] |
 | Memoria Máxima Utilizada (Max Memory) | 96 MB / 128 MB | 90 MB / 128 MB |
 
-*\* Nota sobre la métrica Errors:* Las excepciones no controladas se capturan en el bloque `try/except` de cada función Lambda devolviendo un código HTTP 500 o 400 controlado en la respuesta JSON. Debido a esto, el contador de métricas nativo `Errors` de AWS Lambda (que solo contabiliza caídas no controladas del runtime) registra 0.
+*\* Nota sobre la métrica Errors:* Las excepciones no controladas se capturan dentro del bloque `try/except` de cada función Lambda devolviendo un código HTTP 500 o 400 controlado en el cuerpo de la respuesta JSON. Debido a esto, el contador de métricas nativo `Errors` de AWS Lambda (que solo contabiliza caídas del runtime o fallos fatales) registra 0.
 
 ![CloudWatch Métricas](img/09_cloudwatch_metrics.png)
 *Figura 9: Métricas agregadas de invocaciones y duración en CloudWatch.*
 
-#### 6.3 Error Provocado y Análisis
-Como parte de las pruebas de resiliencia y troubleshooting:
-- **Prueba 1 (Cuerpo vacío en subida):** En Postman [PENDIENTE: confirmar herramienta usada] se envió una petición `POST /upload` sin cuerpo (body vacío). La función capturó la excepción `ValueError`, registrando en CloudWatch `Error de validacion: No image data received` y devolviendo al cliente un código HTTP `400 Bad Request` con `{"error": "No image data received"}` en lugar de un error 500 no controlado.
-- **Prueba 2 (Identificador inexistente):** Se consultó `GET /metadata/nonexistent99999`. La función verificó la ausencia del ítem en DynamoDB y retornó de forma limpia un código `404 Not Found` con `{"message": "Image not found"}`.
+#### 6.3 Error Provocado y Diagnóstico
+- **Diagnóstico del Error 400:** Al enviar un cuerpo vacío, el log de CloudWatch evidencia la traza `Error de validacion: No image data received`. Esto demuestra que la validación en código evita escrituras erróneas en S3 o DynamoDB y asegura que el cliente reciba un código de estado explicativo sin comprometer la estabilidad del backend.
+- **Diagnóstico del Error 404:** Al no encontrar la clave primaria en DynamoDB, la Lambda evita arrojar una excepción y emite un mensaje estructurado `Image not found`.
+
+#### 6.4 Análisis de Rendimiento
+Basado exclusivamente en los datos reales registrados en CloudWatch:
+1. **Impacto del Cold Start (Init Duration vs Duration):** En el cold start de `upload_image`, la fase de inicialización del entorno (`Init Duration: 528.08 ms`) superó la duración propia de ejecución del código (`Duration: 505.51 ms`), duplicando el tiempo total de la primera petición. Esto confirma empíricamente que la fase de arranque en frío es el factor determinante en la latencia inicial de arquitecturas serverless.
+2. **Aprovechamiento de Memoria:** La función `upload_image` consumió un máximo de 96 MB de los 128 MB asignados (75% de utilización), mientras que `get_image_metadata` consumió 90 MB (70%). Ambas funciones operan holgadamente dentro del límite configurado sin riesgo de sobrecarga (*Out of Memory*), confirmando que 128 MB es un dimensionamiento eficiente para este tamaño de carga de trabajo.
+3. **Variable con Mayor Impacto en el Rendimiento:** La variable que genera mayor variación en el tiempo de respuesta es la reutilización del contenedor caliente (*warm container*) y de las conexiones TCP/TLS de los clientes `boto3` instanciados fuera del handler, eliminando los ~528 ms de inicialización en peticiones subsiguientes.
 
 ---
 
@@ -210,7 +228,7 @@ Como parte de las pruebas de resiliencia y troubleshooting:
 2. **Impacto de la Memoria en Cómputo y CPU:**
    En AWS Lambda, la vCPU asignada es proporcional a la memoria RAM configurada. Las funciones están configuradas actualmente con **128 MB**. Pasar a **512 MB** aumentaría la CPU asignada de forma proporcional a la memoria (aprox. 4 veces respecto a 128 MB), lo que aceleraría el procesamiento criptográfico de firmas de URLs prefirmadas y la transferencia a S3, reduciendo la duración facturada.
 3. **Mitigación de Arranques en Frío (Cold Starts):**
-   Para entornos de producción con requerimientos de latencia estricta, la habilitación de **Provisioned Concurrency** (Concurrencia Aprovisionada) mantiene entornos de ejecución preinicializados, eliminando la sobrecarga del Init Duration en picos de demanda.
+   Para entornos con requerimientos de latencia estricta, la habilitación de **Provisioned Concurrency** mantiene entornos de ejecución preinicializados, eliminando la sobrecarga del Init Duration en picos de demanda.
 4. **Modo On-Demand en DynamoDB:**
    La tabla opera en modo `PAY_PER_REQUEST`, lo que evita caídas por saturación de lectura o escritura (*throttling*) y elimina costos por capacidad aprovisionada no utilizada.
 
@@ -219,7 +237,10 @@ Dado que el bucket mantiene activo el bloqueo de acceso público (*Block Public 
 Para resolver esto de forma segura y eficiente:
 - La función `upload_image` genera y retorna una **URL Prefirmada (Pre-Signed URL)** con una vigencia de 1 hora (`ExpiresIn=3600`), permitiendo al usuario descargar o visualizar la imagen de forma temporal y autenticada.
 - Al consultar `GET /metadata/{image_id}`, la función `get_image_metadata` genera dinámicamente una nueva URL prefirmada con vigencia de 1 hora a partir de la `key` almacenada, garantizando que el cliente siempre reciba un enlace funcional sin comprometer la seguridad del bucket.
-- **Recomendación para cargas masivas:** Como siguiente paso evolutivo en arquitectura serverless, para archivos de gran tamaño se recomienda que API Gateway devuelva una URL prefirmada de subida (`put_object`), permitiendo que el cliente envíe el archivo directamente a S3 sin transitar por API Gateway ni Lambda.
+
+### 3.3 Recomendación de Arquitectura para Producción (No implementada en el laboratorio)
+Como mejora avanzada para escenarios con alto volumen de carga o archivos de gran tamaño:
+- **Subida directa con Pre-Signed PUT:** En lugar de enviar los datos binarios de la imagen a través de API Gateway y Lambda (lo que satura la memoria de la función y genera costos de cómputo adicionales), la API debería limitarse a generar y devolver una URL prefirmada de subida (`s3_client.generate_presigned_url('put_object', ...)`). De este modo, el cliente transfiere el archivo directamente a Amazon S3, descargando por completo la capa de cómputo serverless y reduciendo drásticamente la latencia y los costos de transferencia.
 
 ---
 
@@ -259,6 +280,7 @@ curl -X POST https://[API_URL]/upload
 │   ├── 05b_api_stage.png                 # Stage dev de API Gateway
 │   ├── 06_postman_post.png               # Prueba POST en Postman
 │   ├── 07_postman_get.png                # Prueba GET en Postman
+│   ├── 07b_download_presigned.png        # [PENDIENTE] Descarga de imagen vía URL prefirmada
 │   ├── 08_cloudwatch_logs.png            # Logs de CloudWatch
 │   └── 09_cloudwatch_metrics.png         # Métricas de CloudWatch
 └── src/                                   # Código fuente de las funciones serverless
