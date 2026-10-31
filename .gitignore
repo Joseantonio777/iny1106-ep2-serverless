@@ -1,0 +1,11 @@
+node_modules/
+package.json
+package-lock.json
+*.js
+*.pyc
+__pycache__/
+*.zip
+deploy_apigw.py
+capture_aws.js
+generate_postman_shots.js
+test_api.py
