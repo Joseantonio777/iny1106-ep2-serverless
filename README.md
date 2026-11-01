@@ -4,7 +4,6 @@
 
 - **Asignatura:** Infraestructura de Aplicaciones II (INY1106)
 - **Estudiante:** José Villarroel
-- **Carrera:** Ingeniería en Informática / Conectividad y Redes
 - **Institución:** Duoc UC
 - **Región AWS:** `us-east-1` (N. Virginia)
 - **Cuenta AWS:** `[ACCOUNT_ID]` (AWS Academy Learner Lab)
