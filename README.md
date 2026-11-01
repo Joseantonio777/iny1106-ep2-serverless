@@ -155,7 +155,7 @@ Las pruebas se realizaron con Postman contra el stage `dev`.
 Al abrir la URL `url` del GET en el navegador, la imagen se visualiza sin autenticación adicional, porque la firma es válida durante 1 hora.
 
 ![Descarga por URL prefirmada](img/07b_download_presigned.png)
-*Figura 7.1: Imagen visualizada en el navegador a partir de la URL prefirmada.*
+*Figura 7.1: Verificación de descarga directa desde S3 mediante URL prefirmada (HTTP 200 OK y firma JFIF detectada).*
 
 ### 3.4 Pruebas de error
 
